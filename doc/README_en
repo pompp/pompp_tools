@@ -1,0 +1,472 @@
+========================================================================
+o PomPP library and tools.
+Library to measure and to limit powers by RAPL, and tool to insert
+power meausurment/control functions in a user source code automatically.
+========================================================================
+
+########################################################################
+# 0. Requirements
+########################################################################
+
+0.1. Syetem requirements
+----------------------------
+- Intel Xeon E5 processor with the generation of Sandy Bridge or Ivy Bridge.
+
+- Availability to access device file of MSR, which is provided by Linux-OS.
+  (Needed the Linux kernel version 2.6.32 or later)
+
+- CPUfreqlibs (to control the CPU frequency).
+
+- Assigned node list which may be provided by the scheduler.
+    Note.
+      If the MPI invokes 2 or more processes per node, the same node name
+      must be appeared multiple times in the node list.
+      For example, for the case of 2 processes per node, the assigned
+      nodes are listed as follows,
+        host1
+	host1
+	host2
+	host2
+	... ,
+      but not as follows,
+        host1:2
+	host2:2
+	... ,
+      nor
+        host1 slot=2
+	host2 slot=2
+	... .
+
+0.2. Requirements for target application
+-------------------------------------------
+- MPI/OpenMP hybrid parallelization has been applied.
+
+- Assume not to assign multiple processes per CPU (package).
+
+########################################################################
+# I. How to install PomPP library and tool
+########################################################################
+1. Get the source package needed by this library and tool.
+  - Program Database Toolkit (PDT) Ver. 3.20 or later.
+      You can get it from the following URL:
+	http://www.cs.uoregon.edu/research/pdt/home.php
+
+2. Modify the source code pompp_tools/lib/src/node.c
+
+  The function named NODE_Get_id() written in this file returns the
+  unique node ID in the target system of the calling MPI process.
+  This code should be implemented depending on the target systems.
+
+  The original node.c is the sample implementation for the HA8K system
+  used in our test. In the HA8K system, the last 3 characters of the
+  host name indicate the node number in the system, which can be used
+  as the unique node ID.
+
+  If your system returns the host name request with another format of
+  the HA8K system, you may modify the node.c.
+
+3. Compile and install the library and tool.
+  ./configure
+  make
+  make install
+
+  3.1 Options for configure.
+    --with-mpi		     : Compile with MPI compiler
+    --with-mpicc=<ARG>	     : Specify the MPI compiler to be used
+    --with-intel-compiler    : Use Intel compiler
+    --with-pdt-dir=<DIR>     : Specify the directory where PDT binaries are installed
+    --with-pdt-libdir=<DIR>  : Specify the directory where PDT libraries are installed
+    --with-pdt-incdir=<DIR>  : Specify the directory where PDT header files are installed
+    --prefix=<DIR>	     : Destination where this library and tool are installed
+
+  3.2 Exapmle of compiling and installation
+    ./configure --with-pdt-dir=$HOME/x86_64/x86_64 --with-intel-compiler \\
+	--with-mpi --prefix=$HOME/x86_64
+    make
+    make install
+
+If the compile and installation complete successfully, the library and
+tool are installed in the specified destinations as follows,
+
+  ${prefix}/bin		# control function insertion tools and scripts for
+  			# executions such as mpirun-opt.sh and
+ 			# mpirun-prof.sh
+           /include	# include files
+	   /lib		# library files
+	   /etc		# machine setting file "machine.conf" and
+	   		# power variation table (PVT) "pwr-spec-table.txt"
+	   /app-data	# power consumption data of applications
+
+########################################################################
+# II. Preparation before the use of the PomPP library and tool
+########################################################################
+1. Describe target machine setings in "machine.conf" file (which is put
+   in ${prefix}/ric/etc). The following parameters are required to be set:
+     Parameter name		Meaning
+     --------------------	---------------------------------------
+     POMPP_NPKGS_PER_NODE	Number of CPUs (packages) per node
+     POMPP_NCORES_PER_PKG	Number of physical cores per package
+     POMPP_TOTAL_NODES		Number of nodes in target system
+     POMPP_MAX_FREQ		Maximum CPU frequency (unit in 100MHz)
+     POMPP_MIN_FREQ		Minimum CPU frequency (unit in 100MHz)
+     POMPP_PKG_TDP		TDP of CPU (watts)
+     POMPP_DRAM_TDP		TDP of DRAM (watts)
+     POMPP_PKG_MIN		Minimum CPU power (watts)
+     POMPP_DRAM_MIN		Minimum DRAM power (watts)
+     POMPP_MODULE_MIN		Minimum module (CPU+DRAM) power (watts)
+
+2. Prepare the Power Variation Table (PVT)
+   The PVT is used to estimate the power consumptions of CPU and DRAM for
+   each module in executing the application, and which indicates the power
+   variation of CPU and DRAM between modules.
+   To generate the PVT of the target system, it is required to execute the
+   micro-benchmark program using all modules in the system at maximum and
+   minimum CPU frequencies to get the power consumption data.
+   And then, you calculate the ratios of power consumption for each node
+   to its average over entire modules in the system and write down the
+   ratios on the PVT file (${prefix}/etc/pwr-spec-table.txt) as follows:
+
+   gmid_0 rCPUmax_0 rDRAMmax_0 rCPUmin_0 rDRAMmin_0
+   gmid_1 rCPUmax_1 rDRAMmax_1 rCPUmin_1 rDRAMmin_1
+   gmid_2 rCPUmax_2 rDRAMmax_2 rCPUmin_2 rDRAMmin_2
+   ...
+
+   where,
+   gmid_i     = unique module ID of module i in target system
+   rCPUmax_i  = ratio of CPU power of module i to the average at max freq.
+   rDRAMmax_i = ratio of DRAM power of module i to the average at max freq.
+   rCPUmin_i  = ratio of CPU power of module i to the average at min freq.
+   rDRAMmin_i = ratio of DRAM power of module i to the average at min freq.
+
+   o The unique module ID (gmid_i) can be obtained by using node name
+     (or unique node ID) and module ID in the node (= local module ID)
+
+   o The scripts to support the construction of the PVT are provided.
+     (See section V)
+
+   o You can select any application program as the micro benchmark
+     program (micro-bench). We recommend an embarassingly parallel
+     (EP) type application as the micro-bench because the performance
+     variation between executions can be seen in executing
+     communication heavy programs.
+
+########################################################################
+# III. How to measure power parameters of applications and
+#      optimize the performance of them under power constraint
+########################################################################
+1. Insert the following functions to measure and control powers in
+   source codes of the target application.
+   i)   "POMPP_Init" function at just after "MPI_Init" function
+   ii)  "POMPP_Finalize" function at jusr before "MPI_Finalize" function
+   iii) Target section or function is surrounded by "POMPP_Start_section"
+        and "POMPP_Stop_section" functions with same argument of section
+	name to measure and/or control powers
+
+2. Compile source codes and link object codes with PomPP library.
+    For example, the library is installed in the directory under
+    ${prefix}/ric,
+	- Append the search path of include file (only for C)
+	    CFLAGS += -I${prefix}/ric/include
+	- Append options to linker (C and Fortran)
+	    LDFLAGS += -L${prefix}/ric/lib -lric
+
+    NOTICE:
+	If your code needs library installed in directory except the
+	default search path (/lib, /usr/lib, and so on), you have to
+	append the directory to the search path by using "-Wl,-rpath"
+	option for the linker.
+	(The setting of LD_LIBRARY_PATH is invalidated in executing the
+	 application program which has special capability)
+
+3. Give the capability to access MSR registers for the executable object
+   of application.
+    Ex.) If the target binary is named as a.out,
+        /usr/sbin/setcap cap_sys_rawio=ep a.out
+
+    NOTICE:
+	i)   Need the root privileges to execute above command.
+	ii)  It is not required to give the capability if you use linux
+             OS earlier than version 2.2.
+	iii) It is not required to give the capability if you will execute
+             the target application under the root privileges.
+	iv)  You have to copy the target binary to all local file systems
+	     of nodes used in the parallel execution and give the
+	     capability to all of them.  The target binary in the shared
+	     file system cannot be executed without the root privileges.
+	     (When you use the linux OS version 2.2 or later)
+
+4. Measure power parameters during the execution of the application.
+    Ex.) mpirun-prof.sh -app app1 app1.exe
+
+5. Execute the application optimally under power constraint.
+    Ex.) mpirun-opt.sh -app app1 -power 90.5 app1.exe
+
+########################################################################
+# IV. Outline of functions provided by PomPP library
+########################################################################
+The PomPP library provides following 4 functions to measure and control
+power while executing applications,
+      1. POMPP_Init		Initialize the library
+      2. POMPP_Finalize		Finalize the library
+      3. POMPP_Start_section	Specify the start point to measure and/or
+				control powers
+      4. POMPP_Stop_section	Specify the end point to measure and/or
+				control powers
+
+Details of these functions are described below:
+
+1. POMPP_Init	Initialize the PomPP library
+  SYNOPSIS:
+    int POMPP_Init( int argc, char* argv [] );	(C)
+    call pompp_init()				(Fortran)
+  ARGUMENTS:
+    int argc
+      The number of command line options in executing the application
+    char* argv[]
+      array of strings of command line options
+  RETURN VALUE
+    (C)
+    0 : Successfully exit
+    -1: Error exit (failure to initialize the library)
+    (Fortran)
+    none
+
+2. POMPP_Finalize	Finalize the PomPP library
+  SYNOPSIS:
+    void POMPP_Finalize();	(C)
+    call pompp_finalize()	(Fortran)
+  ARGUMENTS:
+    none
+  RETURN VALUE
+    none
+
+3. POMPP_Start_section	 Specify the start point of the target section
+  SYNOPSIS:
+    int POMPP_Start_section( const char *secname );	(C)
+    call pompp_start_section( secname )			(Fortran)
+  ARGUMENT:
+    const char *secname		(C)
+    character secname(*)	(Fortran)
+      The name of target section to measure and/or control powers.
+      (Use same argument of corresponding POMPP_Stop_section function)
+  RETURN VALUE
+    (C)
+    0 : Successfully exit
+    -1: Error exit
+      a) Initialize function has not finished yet, or
+      b) Too many sections (more than 128) have been registered.
+    (Fortran)
+    none
+
+4. POMPP_Stop_section	Specify the end point of the target section
+  SYNOPSIS:
+    int POMPP_Stop_section( const char *secname );	(C)
+    call pompp_stop_section( secname )			(Fortran)
+  ARGUMENT:
+    const char *secname		(C)
+    character secname(*)	(Fortran)
+      The name of target section to measure and/or control powers.
+      (Use same argument of corresponding POMPP_Start_section function)
+  RETURN VALUE
+    (C)
+    0 : Successfully exit
+    -1: Error exit
+      a) Initialize function has not finished yet, or
+      b) Corresponding POMPP_Start_section has not been called yet.
+    (Fortran)
+    none
+
+#################################################################
+# V. How to Use the Automatic Instrumentation Tool
+#                                 for Power Measurement/Control
+#################################################################
+
+The instrumentation tool (pompp_inst) inserts library calls into the
+target source code to measure/control power consumption based on
+analysis information provided by PDT.
+
+
+1. (Optional) Getting profile data with TAU
+
+This tool (pompp_inst) can automatically select the target functions
+for power measurement/control based on profiling data provided by TAU
+Performance System. After compiling and running your target
+application with TAU, "pprof" command will generate its profiling
+result as a text data:
+
+   % pprof > pprof.log
+
+For more information about TAU, please refer:
+ https://www.cs.uoregon.edu/research/tau/home.php
+
+
+2. Source Code Analysis with PDT.
+
+Analyze the target application source code with PDT (Program Database
+Toolkit):
+
+  - For C programs:
+       % cparse test.c
+  - For Fortran programs:
+       % gfparse test.f
+
+You may specify some include path with "-I" option.
+This will generate a PDB file (named "test.pdb" in this example).
+
+
+3. (Optional) Source Code (comments) Analysis with PDT.
+
+Provide directive (#pragmas, etc.) information by using PDT. Some
+directives (e.g. OpenMP) may be handled as comments in the source
+code. In this case, pompp_inst may require the information about them.
+
+- for C and Fortran program both:
+       % pdbcomment test.pdb -o test.pdbc
+
+This will generate a PDB file with comment information (named
+"test.pdbc" in this example).
+
+
+4. Automatic Instrumentation of power Measurement/Control Library Calls
+
+Instrument the target application with pompp_inst.
+
+- Basic Usage:
+       % pompp_inst test.pdb test.c -o test.ins.c
+
+  This will select all of the functions in the input source file for
+  controlling/measuring power consumption.
+
+
+- Options for "pompp_inst"
+   The following options are provided to select functions to insert library calls:
+
+    - -pdb-cmt test.pdbc
+       Specify the analysis data about the comment in the target
+       source file.  You may need to use this option to handle a
+       parallelized code with OpenMP.
+
+    - -prof <FileName>
+       Specify the profiling data file generated with TAU.
+       The following options require this information.
+
+    - -instnum <num>
+       Specify how many functions should be selected for the
+       instrumentation. You may control the priority to select them
+       by changing the sorting criteria of pprof.
+
+    - -minct <num>
+       Specify the minimum number of calls to select functions for the
+       instrumentation.
+
+    - -maxct <num>
+       Specify the maximum number of calls to select functions for the
+       instrumentation.
+
+    - -tt <num>
+       Specify the minimum execution time per call (microsecond) to
+       select functions for the instrumentation.
+
+
+5. Compile and Link
+
+Compile the generated (instrumented) source file, and link with the
+PomPP library. You may specify the installation directory of the
+library with "-L" option.
+
+  % mpicc test.c -lric
+
+
+########################################################################
+# VI. Outline of scripts provided by PomPP library
+########################################################################
+The PomPP library provides following three scripts for convenients,
+    1. mpirun-ubmt.sh	Generate the power variation table (PVT).
+    2. mpirun-prof.sh	Get the power parameters of application program
+                        needed to execute it optimally under power
+			constraint using mpirun-opt.sh script.
+    3. mpirun-opt.sh	Execute the application program optimally under
+    			power constraint.
+
+These three scripts is wrapper command for "mpirun", and the command line
+options except ones for the functionalities provided by PomPP library
+will be passed to the "mpirun".
+
+Details of scripts are described below.
+
+1. mpirun-ubmt.sh	Generate the power variation table (PVT).
+  SYNOPSIS:
+    mpirun-ubmt.sh [options] micro-bench-executable [option for executable]
+  OPTIONS:
+    -itera n
+      Number of iterations to execute the micro benchmark program at
+      maximum and minimum CPU frequencies, respectively(default: 10 times).
+    -table table-name
+      File name of the generated PVT by absolute path
+      (default: "${prefix}/ric/etc/pwr-spec-table.txt").
+
+  NOTICE:
+    All processors in the target system must be used in executing the
+    micro-benchmark program and in generating the PVT with this script.
+    Otherwise the optimal executions of the application programs under
+    power constraint may be failed.
+
+2. mpirun-prof.sh	Get the power parameters of application program
+			needed to optimal execution it under power
+			constraint using mpirun-opt.sh script.
+  SYNOPSIS:
+    mpirun-prof.sh -app app-name [options] executable \
+	[option for executable]
+  OPTIONS:
+    -app app-name
+      The identification name of the application program to be executed.
+    -itera n
+      Number of iterations to execute the application program at maximum
+      and minimum CPU frequencies, respectively (default: once (1) ).
+    -table table-name
+      File name of the PVT obtained by using "mpirun-ubmt.sh" or manually
+      (default: "${prefix}/ric/etc/pwr-spec-table.txt").
+
+3. mpirun-opt.sh	Execute the application program optimally under
+			power constraint.
+  SYNOPSIS:
+    mpirun-opt.sh -power module_power -prof no -app app-name [options] \
+	executable [options for executable]
+    or
+    mpirun-opt.sh -power module_power -prof [yes|section|energy] \
+	-prefix profile-prefix -app app-name [options] \
+	executable [options for executable]
+  OPTIONS:
+    -power module_power
+      (Average) power cap for each module (Watts) (default: sum of TDPs
+      of CPU and DRAM)
+    -prof [yes|no|section|energy]
+      Profiling mode. If the mode is not "no", -prefix option must be
+      specified to determine the output file name.
+	  no		No profile data is measured and printed out.
+	  yes, section	Measure and print out profile data such as elapsed
+	  		time, CPU and DRAM powers, average CPU frequency,
+			etc. for each section.
+	  energy	Measure powers of CPU and DRAM every specified
+		        interval and the energy data for each interval
+			and start and end times of each section are print
+			out in *.ene and *.sec files, respectively.
+    -app app-name
+      The identification name of the application program whose power data
+      has already been obtained by using mpirun-prof.sh command.
+      For same application program, same app-name must be used for both
+      mpirun-prof.sh and mpirun-opt.sh commands.
+    -prefix profile-prefix
+      Prefix of the output files of obtained profile data when "-prof yes",
+      "-prof section" or "-prof energy" is specified.
+      Output file name will be set as follows,
+	  (profile-prefix)-rank-pkgid.sec	Section performance data, or
+	  					timing data of each section
+	  (profile-prefix)-rank-pkgid.ene	Energy profile data
+    -mode [rapl|freq]
+      Power constraint mode (default: "rapl").
+          rapl	Power capping mode which the module power is limited by
+	  	capping CPU and DRAM powers using the RAPL interface.
+	  freq	Frequency selection mode which the module power is limited
+	  	by the CPU frequency control using the CPUfreqlibs.
+

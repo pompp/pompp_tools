@@ -1,0 +1,411 @@
+○ ライブラリ/制御関数自動挿入ツールの実行環境構築について
+もくじ
+  0. 前提としているシステム要件
+  I. ライブラリ/制御関数自動挿入ツールのコンパイル、インストール
+ II. ライブラリ利用の前準備
+III. で本ライブラリを用いた電力測定・電力制約下での最適化を行うまでの手順
+ IV. 本ライブラリが提供する関数の概要
+  V. 制御・測定関数自動挿入ツールの使用方法
+ VI. 実行スクリプトの概要
+
+
+##################################################
+# 0. 前提としているシステム要件
+##################################################
+本ライブラリ・ツールは、以下のようなシステムでの利用を想定している。
+
+1.  CPU: Sandy Bridge、または、Ivy Bridge世代のIntel Xeonプロセッサ
+    - RAPLでDRAM消費電力が測定できる
+    - ソケット単位で電力を制御する（コア単位ではない）
+2.  制御を行う対象とするアプリはMPI/OpenMP hybrid並列化されている
+    2.1. 1つのCPU（ソケット）に複数プロセスがmappingされることはない前提！
+3.  1つの物理ノードに複数のCPU（ソケット）が搭載されているシステム利用時に
+    物理ノードあたり複数のMPIプロセスを起動する場合には、スケジューラから
+    渡されるホストファイルに同一ホスト名が複数回、記載されていること。
+    例えば、物理ノードあたり2プロセスを起動する場合には、ホストファイルに
+	host0
+	host0
+	host1
+	host1
+	...
+    のように記載されていると仮定。
+	host0:2
+	host1:2
+	...
+    や
+	host0 slot=2
+	host1 slot=2
+	...
+    などの渡され方ではない。
+4.  OSはMSRへのアクセスのためのデバイスファイルが提供されているLinux OSで
+    あること
+5.  CPU動作周波数を制御するためのライブラリCPUFreqlibsが利用できること
+
+##########################################
+# I.ライブラリ・ツールのコンパイル、インストール
+##########################################
+以下の手順で、ライブラリおよび関数自動挿入ツールのコンパイル・インストールを行う
+
+1. 必要な外部パッケージ
+    - CPUfreqlibsが利用可能
+    - Linux kernel version 2.6.32以上（MSRへのアクセスが可能である）
+    - Program Database Toolkit (PDT) Ver. 3.20 or later
+    -- http://www.cs.uoregon.edu/research/pdt/home.php より入手
+
+2. ライブラリ/関数自動挿入ツールのコンパイル・インストール
+    ./configure
+    make
+    make install
+
+2.2 configure のオプション
+    - --with-mpi               : MPIコンパイラでライブラリをコンパイル
+    - --with-mpicc=<ARG>       : MPIコンパイラを指定してライブラリをコンパイル
+    - --with-intel-compiler    : Intelコンパイラを利用してコンパイル
+    - --with-pdt-dir=<DIR>     : PDTのインストール先を指定
+    - --with-pdt-libdir=<DIR>  : PDT（ライブラリ）のインストール先を指定
+    - --with-pdt-incdir=<DIR>  : PDT（ヘッダファイル）のインストール先を指定
+    - --prefix=<DIR>           : 本ライブラリ・ツールのインストール先を指定
+
+2.3 インストール手順の具体例
+    ./configure --with-pdt-dir=$HOME/x86_64/x86_64 --with-intel-compiler --with-mpi --prefix=$HOME/x86_64
+    make
+    make install
+
+インストールが正常に終了すると、以下のディレクトリ構成で各種ファイルが作成される
+
+${prefix}/bin		# mpirun-opt.sh, mpirun-prof.shなどの実行用
+			# スクリプト，関数挿入ツールの置き場所
+	 /include	# インクルードファイルの置き場所
+	 /lib		# ライブラリlibric.aの置き場所
+	 /etc		# マシン設定ファイルmachine.confと電力消費特性
+			# テーブルpwr-spec-table.txtの置き場所
+	 /app-data	# 各アプリの消費電力データの格納場所
+
+###############################################
+# II. ライブラリ利用の前準備
+###############################################
+1. マシン設定ファイルの記述
+    利用するマシンの基本的な情報をマシン設定ファイル(${PREFIX}/ric/etc/
+    machine.conf)に記述する。記載する内容は以下の通り。
+
+    変数名			内容
+    POMPP_NPKGS_PER_NODE	計算ノードあたりのCPUソケット数
+    POMPP_NCORES_PER_PKG	CPUソケットあたりの物理コア数
+    POMPP_TOTAL_NODES		システムに含まれるノード総数
+    POMPP_MAX_FREQ		CPUの最高クロック周波数（100MHz単位）
+    POMPP_MIN_FREQ		CPUの最低クロック周波数（100MHz単位）
+    POMPP_PKG_TDP		CPUのTDP（W単位）
+    POMPP_DRAM_TDP		DRAMのTDP（W単位）
+    POMPP_PKG_MIN		CPUの最低動作電力（W単位）
+    POMPP_DRAM_MIN		DRAMの最低動作電力（W単位）
+    POMPP_MODULE_MIN		モジュール（=CPU+DRAM）最低電力
+				制約値（W単位）
+
+2.  電力消費特性テーブル
+小規模ベンチマークアプリ（μベンチ）をシステムに含まれる全モジュールで、
+i) 電力制約なし、および、ii)最低動作周波数制約、の条件下で実行した場合の
+CPUとDRAMの消費電力を測定して、各モジュール消費電力の平均値に対する比を
+テキスト形式で記述したファイル（${PREFIX}/ric/etc/pwr-spec-table.txt）で
+あり、以下のような書式で出力されている。
+
+gmid_0 rCPUmax_0 rDRAMmax_0 rCPUmin_0 rDRAMmin_0
+gmid_1 rCPUmax_1 rDRAMmax_1 rCPUmin_1 rDRAMmin_1
+gmid_2 rCPUmax_2 rDRAMmax_2 rCPUmin_2 rDRAMmin_2
+...
+
+gmid_i     = モジュールiのシステム内での一意のID
+rCPUmax_i  = モジュールiの非制約時CPU消費電力の平均値に対する比
+rDRAMmax_i = モジュールiの非制約時DRAM消費電力の平均値に対する比
+rCPUmin_i  = モジュールiの最低動作周波数時CPU消費電力の平均値に対する比
+rDRAMmin_i = モジュールiの最低動作周波数時DRAM消費電力の平均値に対する比
+
+モジュールID（gmid_i）は、ノードID（ノード名）とノード内ソケットIDから
+計算される（はず）。
+
+電力消費特性テーブル作成用スクリプト mpirun-ubmt.sh を準備している。
+詳細は後述（V章）
+
+####################################################################
+# III. 本ライブラリを用いた電力測定・電力制約下での最適化を
+#      行うまでの手順
+####################################################################
+1. 電力測定・制御を行うアプリのソースコード変更
+    i)  MPI_Init関数の後にライブラリ初期化関数POMPP_Initを、また
+	MPI_Finalize関数の前にライブラリ終了関数POMPP_Finalizeを挿入
+    ii) 電力測定・制御を行う区間をPOMPP_Start_section,
+	POMPP_Stop_section関数で囲む
+	    POMPP_InitとPOMPP_Finalizeで囲まれた区間外にこれらの関数
+	    を挿入しても、無効である（何もしない）
+2. RICライブラリをリンクしてコンパイル
+    ライブラリ一式が${PREFIX}/ric以下にインストール済みだと仮定すると
+	- インクルードファイル検索パスの追加（Cの場合のみ）
+	    CFLAGS += -I${PREFIX}/ric/include
+	- リンク時オプション（C, Fortran共通）
+	    LDFLAGS += -L${PREFIX}/ric/lib -lric
+    注意点：
+	システムのデフォルト検索パス(/lib, /usr/libなど）以外に存在する
+	共有ライブラリを利用する場合には、リンク時に"-Wl,-rpath"オプション
+	を用いて検索パスを追加する必要がある。
+	(capabilityを与えられたバイナリ実行時にはLD_LIBRARY_PATHの設定が
+	 無効化されるため）
+
+3. バイナリにcapabilityを与える
+    a) capabilityを与えるコマンドを次に示す（管理者権限が必要）
+	/usr/sbin/setcap cap_sys_rawio=ep バイナリ
+    b) OSのバージョンによっては必要ない
+    c) バイナリを管理者権限で実行する予定であれば必要ない
+
+4. アプリの消費電力情報を取得する
+    例) mpirun-prof.sh -app app app.exe
+
+5. アプリを電力制約下で最適実行する
+    例) mpirun-opt.sh -app app -power 90.5 app.exe
+
+
+#################################################################
+# IV. 本ライブラリが提供する関数の概要
+#################################################################
+本ライブラリを用いてアプリの電力測定、電力制御（電力最適化実行）を行える
+ようにするために、以下の4つの関数を準備している。
+    1. POMPP_Init		ライブラリの初期化関数
+    2. POMPP_Finalize		ライブラリの終了関数
+    3. POMPP_Start_section	電力測定・制御を行う区間の開始位置指定関数
+    4. POMPP_Stop_section	電力測定・制御を行う区間の終了位置指定関数
+
+以下に、4つの関数の詳細を記載する。
+
+1. POMPP_Init   ライブラリ初期化関数
+    書式：
+	（C言語）
+	int POMPP_Init( int argc, char *argv[] );
+	（Fortran）
+	call pompp_init()
+    引数：
+	int argc
+	    アプリケーション実行時のコマンドラインオプション数
+	    （mainのargcをそのまま渡せば良い）
+	char *argv[]
+	    アプリケーション実行時のコマンドラインオプション（文字列）
+	    （mainのargvをそのまま渡せば良い）
+    戻り値：
+	（C言語）
+	 0 : 正常終了時
+	 -1: 異常終了時（正常にライブラリが初期化できなかった場合）
+	（Fortran）
+	なし	# TODO: 戻り値を返すべき
+
+2. POMPP_Finalize   ライブラリ終了関数
+    書式：
+	（C言語）
+	void POMPP_Finalize();
+	（Fortran）
+	call pompp_finalize()
+    引数：
+	なし
+    戻り値：
+	なし
+
+3. POMPP_Start_section  電力測定・制御を行う区間の開始位置指定関数
+    書式：
+	（C言語）
+	int POMPP_Start_section( const char *secname );
+	（Fortran）
+	call pompp_start_section( secname )
+    引数：
+	const char *secname （C言語）
+	character secname(*) （Fortran）
+	    区間名（対応するPOMPP_Stop_section関数の引数と同じものを指定）
+    戻り値：
+	（C言語）
+	0 : 正常終了（測定・制御区間の設定ができた）
+	-1: 異常終了（次のいずれか）
+	    a) ライブラリが初期化されていない
+	    b) 設定された区間数が規定最大区間数（128）を越えた
+	（Fortran）
+	    なし	# TODO: 戻り値を返すようにする
+
+4. POMPP_Stop_section 電力測定・制御を行う区間の終了位置指定関数
+    書式：
+	（C言語）
+	int POMPP_Stop_section( const char *secname );
+	（Fortran）
+	call pompp_stop_section( secname )
+    引数：
+	const char *secname （C言語）
+	character secname(*) （Fortran）
+	    区間名（対応するPOMPP_Start_section関数の引数と同じものを指定）
+    戻り値：
+	（C言語）
+	0 : 正常終了（測定・制御区間の設定ができた）
+	-1: 異常終了（次のいずれか）
+	    a)  ライブラリが初期化されていない
+	    b)  与えられた区間名に対応するPOMPP_Start_section関数が
+		呼ばれてない
+	（Fortran）
+	    なし	# TODO: 戻り値を返すようにする
+
+
+#################################################################
+# V. 制御・測定関数自動挿入ツールの使用方法
+#################################################################
+本ツールでは，PDTによる解析情報を元に，電力制御・測定関数の自動挿入を
+行う．具体的な手順は下記のようになる．
+なお，以下ではPDTおよびその付属ツールが導入されていることを前提とする．
+
+1. (Optional)TAUを用いた実行プロファイルの取得
+本ツールでは，TAUによる実行プロファイルを用いて，電力制御対象となる関数を
+選択することができる．TAUによるコンパイルと対象アプリケーションの実行，
+およびTAU付属のpprofを用いて出力されたプロファイル結果を生成する．
+
+"profile.0.0.0"や"profile.1.0.0"等のファイルから，pprofを用いて出力した
+結果をテキストファイルとして保存する．
+
+   例） pprof > pprof.log
+
+具体的な手順はTAUのドキュメントを参照のこと．
+
+
+2. PDTを用いたプログラムの解析
+PDT付属のツールを用いて，入力プログラムの解析を行う．
+
+- Cプログラムの場合
+    cparse test.c
+- Fortranプログラムの場合
+    gfparse test.f
+
+必要に応じて，-I オプション等でインクルードパスを指定する．
+上記の操作により，"test.pdb"というファイルが生成される．
+
+3. (Optional)コメント情報の解析
+OpenMPで並列化されたFortranプログラムなど，指示文がコメントとして
+扱われる場合がある．このときソースファイル中のコメント文に関する
+情報も必要となるため，PDT付属のツールを用いてこれを得る．
+
+- C/Fortranプログラム共通
+    pdbcomment test.pdb -o test.pdbc
+
+コメント文に関する解析情報を含む"test.pdbc"が生成される．
+
+4. 電力制御・測定関数の自動挿入
+本ツール（pompp_inst）を用いて，電力制御・計測を行う命令の挿入を行う．
+
+- 基本的な使用方法
+    pompp_inst test.pdb test.c -o test.ins.c
+
+これにより，ソースファイル中全ての関数が制御・計測対象として選択される．
+
+- オプション
+    下記のオプションを用いて，制御・計測対象の関数を選択することができる．
+
+    - -pdb-cmt test.pdbc
+        入力プログラム中のコメント文に関する解析情報を与える．
+        特にOpenMPで並列化されたFortranプログラムを扱う際に必要．
+    - -prof <FileName>
+        TAUで取得したプロファイル結果をpprofで整形したファイルを与える．
+        以降のオプションを用いるにはこの情報が必要．
+    - -instnum <数値>
+        最大幾つの関数を制御対象として選択するかを指定する．
+        pprofを用いてプロファイル結果を出力する際，
+        情報をソートする基準を選択することで対象を制御できる．
+    - -minct <数値>
+        呼び出し回数が指定された数値以上の関数のみを制御対象とする．
+    - -maxct <数値>
+        呼び出し回数が指定された数値以下の関数のみを制御対象とする．
+    - -tt <数値>
+        呼び出しあたりの実行時間（マイクロ秒単位）が
+        指定された数値以上の関数のみを制御対象とする．
+
+5. コンパイルと実行
+生成されたソースファイルをコンパイルし，本ライブラリとリンクして実行する．
+
+  mpicc test.c -lric
+
+
+具体的な電力測定方法・制御方法については，本ドキュメントの他の節を参照のこと．
+
+
+#################################################################
+# VI. 実行スクリプトの概要
+#################################################################
+電力制約下における性能最適化（電力最適化）を適用した実行を行うために、
+以下の3つのスクリプトを準備している。
+    1. mpirun-ubmt.sh	電力消費特性テーブル作成用スクリプト
+    2. mpirun-prof.sh	アプリ消費電力情報取得用スクリプト
+    3. mpirun-opt.sh	電力最適化実行用スクリプト
+
+これら3つのスクリプトはmpirunコマンドに対するwrapperとして動作しており、
+スクリプト独自のコマンドラインオプション以外は、そのままmpirunコマンドに
+渡される。
+以下に、各スクリプトの詳細について記載する。
+
+1. mpirun-ubmt.sh 電力消費特性テーブル作成用スクリプト
+- 実行書式
+    mpirun-ubmt.sh [options] micro-bench-executable [option for executable]
+- 独自オプション
+    -itera n
+	非電力制約時、最低動作周波数時でのμベンチアプリの実行回数
+	（省略時は10回）
+    -table table-name
+	作成した電力消費特性テーブルの出力先ファイル名（絶対パスで）
+	（省略時は${RICTOP}/etc/pwr-spec-table.txt）
+
+- 注意点
+    本スクリプトを用いたμベンチマーク実行、および、電力消費特性テーブル
+    作成は”システムに含まれる全モジュール(CPU+DRAM)を使って実行すること”。
+    洩れたCPUが存在すると、mpirun-opt.shコマンド経由での電力最適化実行が
+    おかしくなる場合がある。
+
+2. mpirun-prof.sh アプリ消費電力情報取得用スクリプト
+- 実行書式
+    mpirun-prof.sh -app app-name [options] executable \
+	[option for executable]
+- 独自オプション
+    -app app-name
+	実行するアプリケーションを識別するための名称。
+	このアプリをmpirun-opt.shスクリプト経由で電力最適化して実行する
+	場合には、ここで指定した名称をmpirun-opt.sh実行時に与える必要がある
+    -itera n
+	非制約時・最低動作周波数時にアプリを実行する回数（省略時 1）
+    -table table-name
+	マイクロベンチ実行で得られた（取得済の）電力消費特性テーブルの
+	ファイル名（絶対パスで）
+	（省略時は ${RICTOP}/etc/pwr-spec-table.txt）
+
+3.  mpirun-opt.sh 電力最適化実行用スクリプト
+- 実行書式
+    mpirun-opt.sh -power module_power -prof no -app app-name [options] \
+	executable [options for executable]
+    または
+    mpirun-opt.sh -power module_power -prof [yes|section|energy] \
+	-prefix profile-prefix -app app-name [options] \
+	executable [options for executable]
+
+- 独自オプション
+    -power module_power
+	モジュール（CPU＋DRAM）に対する電力制約値（W）。
+	省略時はCPUとDRAMのTDP合計値（非電力制約）
+    -prof [yes|no|section|energy]
+	実行プロファイル（電力情報、PMC情報など）をファイルに出力するか
+	どうかを指定。出力する（-prof no以外）場合にには、出力ファイル名の
+	接頭子を -prefix オプションで指定する必要あり。
+	"yes"または"section"の場合には、コード内に指定された区間毎に
+	消費電力や実行時間、ならびに、PMC情報が、各モジュールごとに
+	出力される。
+	"energy"の場合には、各区間を実行した時刻を*.secファイルに、
+	各時刻での消費エネルギー情報を*.eneファイルにそれぞれ出力する。
+    -app app-name
+	事前の取得したアプリの電力特性情報を識別するための名称。
+	mpirun-prof.sh実行時に-appオプションで指定した文字列と同じものを
+	指定する。
+    -prefix profile-prefix
+	実行プロファイルの出力先のファイル名の接頭子。
+	実際のファイル名は 
+	(profile-prefix)-rank-pkgid.sec 区間性能情報
+	(profile-prefix)-rank-pkgid.ene エネルギープロファイル情報
+	の様になる。
+    -mode [rapl|freq]
+	電力制約を行うモード。RAPLによる電力制約を行う場合には"rapl"を、
+	周波数制約により間接的に電力制約を行う場合には"freq"を指定する。
+	（デフォルトは"rapl"）
+
+
