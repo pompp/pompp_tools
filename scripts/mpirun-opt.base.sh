@@ -9,6 +9,7 @@
 # 
 # Copyright (c) 2015, The PomPP research team.
 #
+# Modified on Oct 3, 2017 for switching models in the DSL
 
 
 debug=1
@@ -42,6 +43,8 @@ HEADER=""
 PWR_TABLE=$top/etc/pwr-spec-table.txt
 
 APP=""
+
+MODEL=""
 
 NPROCS=0
 
@@ -81,6 +84,11 @@ do
 	    iarg=$(($iarg + 1))
 	    arg=${all_args[$iarg]}
 	    APP=$arg
+	    ;;
+	-model)
+	    iarg=$(($iarg + 1))
+	    arg=${all_args[$iarg]}
+	    MODEL=$arg
 	    ;;
 	-n|-np)
 	    MPI_ARGS="$MPI_ARGS $arg"
@@ -171,6 +179,12 @@ if [ ! -r $app_data ]; then
     exit 1
 fi
 
+if [ ! -r $MODEL ]; then
+    echo "ERROR: The specified model script $MODEL is invalid"
+    exit 1
+else
+    MODE=CUSTOM
+fi
 
 if [ $debug -eq 1 ]; then
     echo "==== options ===="
@@ -184,6 +198,7 @@ if [ $debug -eq 1 ]; then
     echo "power spec. table  = $PWR_TABLE"
     echo "excecutable        = $BIN"
     echo "application header = $APP"
+    echo "model script       = $MODEL"
     echo "# of procs         = $NPROCS"
     if [ $NODEFILE = $PBS_NODEFILE ]; then
 	echo "node file          = \$PBS_NODEFILE"
@@ -228,6 +243,11 @@ elif [ $MODE = "FREQ" ]; then
     freq=`expr $ifreq \* 100000`
     export POMPP_CPUFREQ=$freq
     echo "CPU frequency      = $freq (KHz)"
+elif [ $MODE = "CUSTOM" ]; then
+    CONF=conf-temp
+    export POMPP_CONFIG=$CONF
+    $MODEL $PWR_TABLE $app_data $NODEFILE \
+	$NPROCS $MODULE_POWER $CONF > conf.log
 fi
 
 
@@ -252,5 +272,7 @@ if [ $MODE = "RAPL" ]; then
     rm -f $CONF-*.conf
 elif [ $MODE = "FREQ" ]; then
     unset POMPP_CPUFREQ
+elif [ $MODE = "CUSTOM" ]; then
+    unset POMPP_CONFIG
+    rm -f $CONF-*.conf
 fi
-

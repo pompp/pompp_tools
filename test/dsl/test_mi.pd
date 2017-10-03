@@ -1,0 +1,16 @@
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 1 C POMPP_Init
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 2 C POMPP_Finalize
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 3 C POMPP_Start_Sec whatever
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 4 C POMPP_Stop_Sec whatever
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 5 Fortran POMPP_Init
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 6 Fortran POMPP_Finalize
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 7 Fortran POMPP_Start_Sec whatever
+INSERT /home/usr1/b73101i/pompp_tools/test/test.file 8 Fortran POMPP_Stop_Sec whatever
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 1 C
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 2 C
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 3 C
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 4 C
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 5 Fortran
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 6 Fortran
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 7 Fortran
+COMMENTOUT /home/usr1/b73101i/pompp_tools/test/test.file 8 Fortran

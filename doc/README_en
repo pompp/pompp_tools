@@ -1,7 +1,19 @@
+/*
+ * The PomPP software including libraries and tools is developed by the
+ * PomPP (Power Managemant Framework for Post-Petascale Supoercomputers)
+ * research project supported by the JST, CREST research program.
+ * The copyrights for code used under license from other parties are
+ * included in the corresponding files.
+ * 
+ * Copyright (c) 2015-2017, The PomPP research team.
+ */
+
 ========================================================================
 o PomPP library and tools.
 Library to measure and to limit powers by RAPL, and tool to insert
 power meausurment/control functions in a user source code automatically.
+
+This file is modified on Oct 3, 2017.
 ========================================================================
 
 ########################################################################
@@ -16,6 +28,11 @@ power meausurment/control functions in a user source code automatically.
   (Needed the Linux kernel version 2.6.32 or later)
 
 - CPUfreqlibs (to control the CPU frequency).
+
+- Java is required for the DSL interpreter to run.
+
+- The jar file of antlr4 needs to be specified in the CLASSPATH for the DSL
+  interpreter to run.
 
 - Assigned node list which may be provided by the scheduler.
     Note.
@@ -142,7 +159,7 @@ tool are installed in the specified destinations as follows,
      (or unique node ID) and module ID in the node (= local module ID)
 
    o The scripts to support the construction of the PVT are provided.
-     (See section V)
+     (See section VI)
 
    o You can select any application program as the micro benchmark
      program (micro-bench). We recommend an embarassingly parallel
@@ -456,6 +473,10 @@ Details of scripts are described below.
       has already been obtained by using mpirun-prof.sh command.
       For same application program, same app-name must be used for both
       mpirun-prof.sh and mpirun-opt.sh commands.
+    -model path-to-the-python-model-script
+      Absolute path to the custom model defined as a plug-in to the framework.
+      The default model used is linear (as in "var-rapl-est.py" and "var-freq-est.py").
+      So this plug-in should be a python script with a similar format to "var-rapl-est.py".
     -prefix profile-prefix
       Prefix of the output files of obtained profile data when "-prof yes",
       "-prof section" or "-prof energy" is specified.
@@ -470,3 +491,12 @@ Details of scripts are described below.
 	  freq	Frequency selection mode which the module power is limited
 	  	by the CPU frequency control using the CPUfreqlibs.
 
+########################################################################
+# VII. The PomPP DSL
+########################################################################
+The PomPP DSL provides an easy and uniform way to interact with other parts of
+the framework. It acts as an front-end of the framework. For more details,
+please refer to the simple PomPP DSL tutorial (pompp_tools/doc/pompp_dsl_tutorial.pdf).
+
+After the installation, pompp_dsl.jar will be installed to ${prefix}/lib.
+It is required to add the jar file to your CLASSPATH.

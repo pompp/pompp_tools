@@ -1,7 +1,7 @@
 #
 # configure.ac for PomPP Instrumentation Tool and Power Control Lib.
 # 
-AC_INIT([pompp_tools], [0.1], [yasutaka.wada@meisei-u.ac.jp])
+AC_INIT([pompp_tools], [0.2], [yasutaka.wada@meisei-u.ac.jp])
 AM_INIT_AUTOMAKE([foreign -Wall -Werror])
 AC_CONFIG_SRCDIR([src/pompp_inst.cc])
 AC_CONFIG_HEADERS([config.h])
@@ -116,6 +116,7 @@ AC_CONFIG_FILES([Makefile
 		 lib/src/Makefile
 		 lib/include/Makefile
 		 scripts/Makefile
-		 etc/Makefile])
+		 etc/Makefile
+		 src/dsl/src/Makefile])
 AC_PROG_RANLIB
 AC_OUTPUT

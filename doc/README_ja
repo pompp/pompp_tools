@@ -1,3 +1,13 @@
+/*
+ * The PomPP software including libraries and tools is developed by the
+ * PomPP (Power Managemant Framework for Post-Petascale Supoercomputers)
+ * research project supported by the JST, CREST research program.
+ * The copyrights for code used under license from other parties are
+ * included in the corresponding files.
+ * 
+ * Copyright (c) 2015-2017, The PomPP research team.
+ */
+
 ○ ライブラリ/制御関数自動挿入ツールの実行環境構築について
 もくじ
   0. 前提としているシステム要件
@@ -7,7 +17,7 @@ III. で本ライブラリを用いた電力測定・電力制約下での最適
  IV. 本ライブラリが提供する関数の概要
   V. 制御・測定関数自動挿入ツールの使用方法
  VI. 実行スクリプトの概要
-
+VII. DSLを用いた実行環境の利用
 
 ##################################################
 # 0. 前提としているシステム要件
@@ -40,6 +50,8 @@ III. で本ライブラリを用いた電力測定・電力制約下での最適
 4.  OSはMSRへのアクセスのためのデバイスファイルが提供されているLinux OSで
     あること
 5.  CPU動作周波数を制御するためのライブラリCPUFreqlibsが利用できること
+
+6.  DSL処理系のためにJavaおよびAntlr4がインストールされていること
 
 ##########################################
 # I.ライブラリ・ツールのコンパイル、インストール
@@ -123,7 +135,7 @@ rDRAMmin_i = モジュールiの最低動作周波数時DRAM消費電力の平�
 計算される（はず）。
 
 電力消費特性テーブル作成用スクリプト mpirun-ubmt.sh を準備している。
-詳細は後述（V章）
+詳細は後述（VI章）
 
 ####################################################################
 # III. 本ライブラリを用いた電力測定・電力制約下での最適化を
@@ -408,4 +420,13 @@ OpenMPで並列化されたFortranプログラムなど，指示文がコメン�
 	周波数制約により間接的に電力制約を行う場合には"freq"を指定する。
 	（デフォルトは"rapl"）
 
+
+##########################################
+# VII. DSLを用いた実行環境の利用
+##########################################
+PomPP DSLを用いることによって、本実行環境の機能を簡単かつ統一された記述で
+利用することができる。インストール後、"pompp_dsl.jar"が ${prefix}/lib に
+インストールされるので、これをCLASSPATHに追加することで利用可能となる。
+詳細についてはチュートリアル仕様を参照のこと。
+（pompp_tools/doc/pompp_dsl_tutorial.pdf）
 
